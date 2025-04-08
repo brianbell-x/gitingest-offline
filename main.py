@@ -8,9 +8,9 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTreeWidget, QTreeWidgetItem, QTextEdit, QFileDialog, QMessageBox, QLabel,
-    QSplitter, QFrame, QGroupBox, QLineEdit
+    QSplitter, QFrame, QGroupBox, QLineEdit # Added QLineEdit here if missing, ensure it's present
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer # Import QTimer if needed for debouncing, but let's start without
 from gitingest import ingest
 
 class NoPartialCheckUI(QMainWindow):
@@ -27,7 +27,19 @@ class NoPartialCheckUI(QMainWindow):
         self.btn_select_directory = QPushButton("Select Directory")
         self.btn_select_directory.clicked.connect(self.on_select_directory)
         top_layout.addWidget(self.btn_select_directory)
-        top_layout.addStretch()
+
+        # Add the directory input field
+        self.directory_input = QLineEdit("C:\\dev") # Default path
+        self.directory_input.setToolTip("Enter directory path or use 'Select Directory'")
+        self.directory_input.editingFinished.connect(self.on_directory_input_changed) # Trigger on Enter or focus loss
+        top_layout.addWidget(self.directory_input, 1) # Give it stretch factor 1
+
+        self.btn_clear_directory = QPushButton("Clear Directory")
+        self.btn_clear_directory.clicked.connect(self.on_clear_directory)
+        self.btn_clear_directory.setEnabled(False)  # Initially disabled
+        top_layout.addWidget(self.btn_clear_directory)
+
+        # No addStretch needed here anymore as QLineEdit takes the space
         self.setMenuWidget(top_widget)
 
         # --- Main splitter: left (directory) / right (output) ---
@@ -109,24 +121,55 @@ class NoPartialCheckUI(QMainWindow):
     # ----------------------
     #     EVENT HANDLERS
     # ----------------------
+    #     EVENT HANDLERS
+    # ----------------------
 
-    def on_select_directory(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Directory", str(Path.home()))
-        if not folder:
+    def load_directory(self, folder_path_str):
+        """Validates path, updates UI, and populates the tree."""
+        folder_path = Path(folder_path_str)
+        if not folder_path.is_dir():
+            QMessageBox.warning(self, "Invalid Directory", f"The path '{folder_path_str}' is not a valid directory.")
+            # Optionally reset input to previous valid path or default
+            # self.directory_input.setText(str(self.selected_directory) if self.selected_directory else "C:\\dev")
             return
-        self.selected_directory = Path(folder)
+
+        self.selected_directory = folder_path
+        self.directory_input.setText(folder_path_str) # Update input field
         self.tree.clear()
         self.output_text.clear()
 
-        self.populate_tree(folder)
+        self.populate_tree(str(folder_path)) # Pass string path
         self.tree.setEnabled(True)
         self.btn_toggle_all.setEnabled(True)
         self.btn_toggle_all.setChecked(False)
         self.btn_toggle_all.setText("Select All")
         self.btn_create_ingest.setEnabled(True)
         self.btn_copy.setEnabled(False)
+        self.btn_clear_directory.setEnabled(True) # Enable clear button
+
+    def on_directory_input_changed(self):
+        """Handles changes from the directory QLineEdit."""
+        path_str = self.directory_input.text().strip()
+        if path_str:
+            # Avoid reloading if the path hasn't actually changed
+            if not self.selected_directory or Path(path_str) != self.selected_directory:
+                 self.load_directory(path_str)
+        # else: # Optional: handle empty input case? Maybe clear the tree?
+        #     self.on_clear_directory() # Or just do nothing
+
+    def on_select_directory(self):
+        """Opens file dialog and loads selected directory."""
+        # Suggest starting from the current input field value if it's a valid dir, else home
+        start_dir = self.directory_input.text().strip()
+        if not Path(start_dir).is_dir():
+            start_dir = str(Path.home())
+
+        folder = QFileDialog.getExistingDirectory(self, "Select Directory", start_dir)
+        if folder:
+            self.load_directory(folder) # Use the central loading function
 
     def populate_tree(self, start_path):
+        """Populates the tree view, expects a string path."""
         self.tree.blockSignals(True)
         root_item = self.create_tree_item(self.tree, start_path)
         self.traverse_dir(root_item, Path(start_path))
@@ -394,6 +437,20 @@ class NoPartialCheckUI(QMainWindow):
             return
         QApplication.clipboard().setText(txt)
         QMessageBox.information(self, "Copied", "Output has been copied to clipboard.")
+
+    def on_clear_directory(self):
+        """Clears the selected directory and resets the UI."""
+        self.selected_directory = None
+        self.tree.clear()
+        self.output_text.clear()
+        self.tree.setEnabled(False)
+        self.btn_toggle_all.setEnabled(False)
+        self.btn_toggle_all.setChecked(False)
+        self.btn_toggle_all.setText("Select All")
+        self.btn_create_ingest.setEnabled(False)
+        self.btn_copy.setEnabled(False)
+        self.btn_clear_directory.setEnabled(False) # Disable clear button
+        self.directory_input.setText("C:\\dev") # Reset input field to default
 
 def main():
     app = QApplication(sys.argv)
